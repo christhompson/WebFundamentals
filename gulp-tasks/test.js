@@ -20,8 +20,13 @@ const GitHubApi = require('github');
 const wfRegEx = require('./wfRegEx');
 const wfHelper = require('./wfHelper');
 const remarkLint = require('remark-lint');
-const ESlintEngine = require('eslint').CLIEngine;
-const JSONValidator = require('jsonschema').Validator;
+
+const testProject = require('./tests/projectYaml');
+const testRedirects = require('./tests/redirectsYaml');
+const testGlossary = require('./tests/glossaryYaml');
+const testContributors = require('./tests/contributorsYaml');
+const testCommonTags = require('./tests/commonTagsJson');
+const lintJavaScript = require('./tests/lintJavaScript');
 
 /** ***************************************************************************
  * Constants & Remark Lint Options
@@ -63,7 +68,6 @@ const VALID_VERTICALS = [
   'education', 'entertainment', 'media', 'real-estate', 'retail',
   'transportation', 'travel',
 ];
-const RESERVED_FILENAMES = ['index'];
 const PAGE_TYPES = {
   LANDING: 'landing',
   ARTICLE: 'article',
@@ -72,7 +76,7 @@ const IS_TRAVIS = process.env.TRAVIS === 'true';
 const IS_TRAVIS_PUSH = process.env.TRAVIS_EVENT_TYPE === 'push';
 const IS_TRAVIS_ON_MASTER = process.env.TRAVIS_BRANCH === 'master';
 
-let eslinter;
+let esLintConfig;
 let remarkLintOptions = {
   external: [
     './gulp-tasks/remark-lint-tests/check-links.js',
@@ -884,45 +888,6 @@ function testJavaScript(filename, contents, options) {
 }
 
 /**
- * Lints a gulp-task JavaScript file
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested
- * @param {string} contents The contents of the file to be tested
- * @return {Promise} A promise that resolves with TRUE if the file was tested
- *  or FALSE if the file was not tested.
- */
-function lintGulpTask(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    if (!eslinter) {
-      resolve(true);
-      return;
-    }
-    const report = eslinter.executeOnText(contents);
-    if (!report || !report.results[0]) {
-      logError(filename, null, 'ESLint didn\'t return a report.');
-      resolve(true);
-      return;
-    }
-    report.results[0].messages.forEach((result) => {
-      const pos = {line: result.line};
-      const msg = `${result.message} (${result.ruleId})`;
-      if (result.severity === 1) {
-        logWarning(filename, pos, msg);
-      } else {
-        logError(filename, pos, msg);
-      }
-    });
-    resolve(true);
-  })
-  .catch(function(ex) {
-    let msg = `An exception occurred in lintGulpTask: ${ex}`;
-    logError(filename, null, msg, ex);
-    return false;
-  });
-}
-
-/**
  * Tests & validates an HTML file.
  *   Note: The returned promise always resolves, it will never reject.
  *
@@ -951,299 +916,6 @@ function testHTML(filename, contents, options) {
     let msg = `An exception occurred in testHTML: ${ex}`;
     logError(filename, null, msg, ex);
     return false;
-  });
-}
-
-/**
- * Tests and validates a commonTags.json file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested.
- * @param {string} contents The unparsed contents of the tags file.
- * @return {Promise} A promise with the result of the test.
- */
-function testCommonTags(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    let tags = parseJSON(filename, contents);
-    if (Array.isArray(tags) === true) {
-      resolve(true);
-    } else {
-      let msg = `Common tags file must be an array, was ${typeof tags}`;
-      logError(filename, null, msg);
-      resolve(false);
-    }
-  });
-}
-
-/**
- * Tests and validates a _project.yaml file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested.
- * @param {string} contents The unparsed contents of the project file.
- * @return {Promise} A promise with the result of the test.
- */
-function testProject(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    const project = parseYAML(filename, contents);
-    JSONValidator.prototype.customFormats.wfUAString = function(input) {
-      return input === 'UA-52746336-1';
-    };
-    const schemaProject = {
-      id: '/Project',
-      type: 'object',
-      properties: {
-        is_family_root: {type: 'boolean'},
-        parent_project_metadata_path: {
-          type: 'string',
-          pattern: /^\/web\/_project.yaml$/,
-        },
-        name: {type: 'string', required: true},
-        description: {type: 'string', required: true},
-        home_url: {type: 'string', pattern: /^\/web\//i, required: true},
-        color: {
-          type: 'string',
-          pattern: /^google-blue|orange$/,
-          required: true,
-        },
-        buganizer_id: {type: 'number', pattern: /^180451$/, required: true},
-        content_license: {
-          type: 'string',
-          pattern: /^cc3-apache2$/,
-          required: true,
-        },
-        footer_path: {type: 'string', required: true},
-        icon: {
-          type: 'object',
-          properties: {
-            path: {type: 'string', required: true},
-          },
-          additionalProperties: false,
-          required: true,
-        },
-        google_analytics_ids: {
-          type: 'array',
-          items: {type: 'string', format: 'wfUAString'},
-          required: true,
-        },
-        tags: {type: 'array'},
-        announcement: {
-          type: 'object',
-          properties: {
-            description: {type: 'string', required: true},
-            background: {type: 'string', required: false},
-          },
-          additionalProperties: false,
-        },
-      },
-      additionalProperties: false,
-    };
-    let validator = new JSONValidator();
-    validator.validate(project, schemaProject).errors.forEach((err) => {
-      let msg = `${err.stack || err.message}`;
-      msg = msg.replace('{}', '(' + err.instance + ')');
-      logError(filename, null, msg);
-    });
-    resolve();
-  });
-}
-
-
-/**
- * Tests and validates a contributors.yaml file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested.
- * @param {string} contents The unparsed contents of the contributors file.
- * @return {Promise} A promise with the result of the test.
- */
-function testContributors(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    let contributors = parseYAML(filename, contents);
-    const schemaContributors = {
-      id: '/Contributors',
-      patternProperties: {
-        '.*': {$ref: '/Contributor'},
-      },
-    };
-    const schemaContributor = {
-      id: '/Contributor',
-      properties: {
-        name: {
-          type: 'object',
-          properties: {
-            given: {type: 'string'},
-            family: {type: 'string'},
-          },
-          required: ['given'],
-          additionalProperties: false,
-        },
-        org: {
-          type: 'object',
-          properties: {
-            name: {type: 'string'},
-            unit: {type: 'string'},
-          },
-          additionalProperties: false,
-        },
-        homepage: {type: 'string', pattern: /^https?:\/\//i},
-        google: {type: 'string', pattern: /^(\+[a-z].*$|[0-9].*$)/i},
-        twitter: {type: 'string', pattern: /^[a-z0-9_-]+$/i},
-        github: {type: 'string', pattern: /^[a-z0-9_-]+$/i},
-        lanyrd: {type: 'string', pattern: /^[a-z0-9_-]+$/i},
-        description: {
-          type: 'object',
-          properties: {
-            en: {type: 'string'},
-          },
-          additionalProperties: false,
-        },
-        role: {type: 'array'},
-        country: {type: 'string'},
-        email: {type: 'string'},
-      },
-      required: ['name'],
-      additionalProperties: false,
-    };
-    let validator = new JSONValidator();
-    validator.addSchema(schemaContributor, schemaContributor.id);
-    validator.validate(contributors, schemaContributors)
-      .errors.forEach((err) => {
-        let msg = `${err.stack || err.message}`;
-        msg = msg.replace('{}', '(' + err.instance + ')');
-        logError(filename, null, msg);
-      }
-    );
-    let prevFamilyName = '';
-    Object.keys(contributors).forEach((key) => {
-      if (/^[a-z]*$/gi.test(key) === false) {
-        const msg = `Identifier must contain only letters, was '${key}'`;
-        logError(filename, null, msg);
-      }
-      if (RESERVED_FILENAMES.indexOf(key.toLowerCase()) >= 0) {
-        const msg = `Identifier cannot contain reserved word: '${key}'`;
-        logError(filename, null, msg);
-      }
-      const contributor = contributors[key];
-      const familyName = contributor.name.family || contributor.name.given;
-      if (prevFamilyName.toLowerCase() > familyName.toLowerCase()) {
-        const msg = `${prevFamilyName} came before ${key}`;
-        logError(filename, null, msg);
-      }
-      prevFamilyName = familyName;
-    });
-    resolve();
-  });
-}
-
-
-/**
- * Tests and validates a glossary.yaml file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested.
- * @param {string} contents The unparsed contents of the glossary file.
- * @return {Promise} A promise with the result of the test.
- */
-function testGlossary(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    const glossary = parseYAML(filename, contents);
-    const schemaGlossary = {
-      id: '/Glossary',
-      type: 'array',
-      items: {$ref: '/GlossaryItem'},
-    };
-    const schemaGlossaryItem = {
-      id: '/GlossaryItem',
-      type: 'object',
-      properties: {
-        term: {type: 'string', required: true},
-        description: {type: 'string', required: true},
-        acronym: {type: 'string'},
-        see: {$ref: '/GlossaryLink'},
-        blink_component: {type: 'string'},
-        tags: {type: 'array'},
-        links: {type: 'array', items: {$ref: '/GlossaryLink'}},
-      },
-      additionalProperties: false,
-    };
-    const schemaGlossaryLink = {
-      id: '/GlossaryLink',
-      properties: {
-        title: {type: 'string', required: true},
-        link: {type: 'string', required: true},
-      },
-      additionalProperties: false,
-    };
-    let validator = new JSONValidator();
-    validator.addSchema(schemaGlossaryItem, schemaGlossaryItem.id);
-    validator.addSchema(schemaGlossaryLink, schemaGlossaryLink.id);
-    validator.validate(glossary, schemaGlossary).errors.forEach((err) => {
-      let msg = `${err.stack || err.message}`;
-      msg = msg.replace('{}', '(' + err.instance + ')');
-      if (err.argument === 'description' && err.name === 'required') {
-        logWarning(filename, null, msg);
-        return;
-      }
-      logError(filename, null, msg);
-    });
-    let prevTermName = '';
-    glossary.forEach((term) => {
-      const termName = term.term.toLowerCase();
-      if (prevTermName > termName) {
-        const msg = `'${prevTermName}' came before '${termName}'`;
-        logError(filename, null, msg);
-      }
-      prevTermName = termName;
-    });
-    resolve();
-  });
-}
-
-/**
- * Tests and validates a _redirects.yaml file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested.
- * @param {string} contents The unparsed contents of the redirects file.
- * @return {Promise} A promise with the result of the test.
- */
-function testRedirects(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    let parsed = parseYAML(filename, contents);
-    let fromPattern = path.dirname(filename).split('/').splice(3).join('/');
-    fromPattern = path.join('/', 'web', fromPattern, '/');
-    const schemaRedirects = {
-      id: '/Redirects',
-      type: 'object',
-      properties: {
-        redirects: {type: 'array', items: {$ref: '/RedirectItem'}},
-      },
-      additionalProperties: false,
-      required: ['redirects'],
-    };
-    const schemaRedirectItem = {
-      id: '/RedirectItem',
-      type: 'object',
-      properties: {
-        to: {type: 'string', required: true},
-        from: {
-          type: 'string',
-          pattern: new RegExp('^' + fromPattern.replace(/\//g, '\\/')),
-          required: true,
-        },
-        temporary: {type: 'boolean'},
-      },
-      additionalProperties: false,
-    };
-    let validator = new JSONValidator();
-    validator.addSchema(schemaRedirectItem, schemaRedirectItem.id);
-    validator.validate(parsed, schemaRedirects).errors.forEach((err) => {
-      let msg = err.stack || err.message;
-      msg = msg.replace('{}', '(' + err.instance + ')');
-      logError(filename, null, msg);
-    });
-    resolve();
   });
 }
 
@@ -1347,21 +1019,35 @@ function testFile(filename, opts) {
       logWarning(filename, null, msg);
       testPromise = testYAML(filename, contents);
     } else if (filenameObj.base === '_contributors.yaml') {
-      testPromise = testContributors(filename, contents);
+      testPromise = testContributors
+        .test(filename, parseYAML(filename, contents))
+        .then(tempPrintResults);
     } else if (filenameObj.base === 'glossary.yaml') {
-      testPromise = testGlossary(filename, contents);
+      testPromise = testGlossary
+        .test(filename, parseYAML(filename, contents))
+        .then(tempPrintResults);
     } else if (filenameObj.base === '_redirects.yaml') {
-      testPromise = testRedirects(filename, contents);
+      testPromise = testRedirects
+        .test(filename, parseYAML(filename, contents))
+        .then(tempPrintResults);
     } else if (filenameObj.base === '_project.yaml') {
-      testPromise = testProject(filename, contents);
+      testPromise = testProject
+        .test(filename, parseYAML(filename, contents))
+        .then(tempPrintResults);
     } else if (filenameObj.base === 'commontags.json') {
-      testPromise = testCommonTags(filename, contents);
+      testPromise = testCommonTags
+        .test(filename, parseJSON(filename, contents))
+        .then(tempPrintResults);
     } else if (MD_FILES.indexOf(filenameObj.ext) >= 0) {
       testPromise = testMarkdown(filename, contents, opts);
     } else if (RE_GULP_BASE.test(filenameObj.dir)) {
-      testPromise = lintGulpTask(filename, contents);
+      testPromise = lintJavaScript
+        .test(filename, esLintConfig, contents)
+        .then(tempPrintResults);
     } else if (filenameObj.base === 'gulpfile.js') {
-      testPromise = lintGulpTask(filename, contents);
+      testPromise = lintJavaScript
+        .test(filename, esLintConfig, contents)
+        .then(tempPrintResults);
     } else if (filenameObj.ext === '.html') {
       testPromise = testHTML(filename, contents);
     } else if (filenameObj.ext === '.yaml') {
@@ -1394,6 +1080,28 @@ function testFile(filename, opts) {
     }
   });
 }
+
+/**
+ * Temporary function to print results from refactored tests
+ *
+ * @param {Array} results The array of results.
+ * @return {Array} results as handed in.
+ */
+function tempPrintResults(results) {
+  results.forEach((result) => {
+    const filename = result.filename;
+    const position = result.position;
+    const message = result.message;
+    const extra = result.extra;
+    if (result.level === 'ERROR') {
+      logError(filename, position, message, extra);
+    } else {
+      logWarning(filename, position, message, extra);
+    }
+  });
+  return results;
+}
+
 
 /** ***************************************************************************
  * Get PR data to potentially ignore any tests
@@ -1497,8 +1205,8 @@ gulp.task('test', ['test:travis-init'], function() {
     let msg = `${chalk.cyan('--ignoreESLint')} was used.`;
     gutil.log(chalk.bold.blue(' Option:'), msg);
   } else {
-    const esLintConfig = parseJSON(ESLINT_RC_FILE, readFile(ESLINT_RC_FILE));
-    eslinter = new ESlintEngine(esLintConfig);
+    esLintConfig = parseJSON(ESLINT_RC_FILE, readFile(ESLINT_RC_FILE));
+    // eslinter = new ESlintEngine(esLintConfig);
   }
 
   // Supress wf_blink_components warnings
