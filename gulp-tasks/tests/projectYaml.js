@@ -81,7 +81,11 @@ function test(filename, project) {
       };
       results.push(result);
     });
-    resolve(results);
+    if (results.length > 0) {
+      reject(results);
+      return;
+    }
+    resolve(true);
   });
 }
 

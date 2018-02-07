@@ -27,18 +27,24 @@ const testGlossary = require('./tests/glossaryYaml');
 const testContributors = require('./tests/contributorsYaml');
 const testCommonTags = require('./tests/commonTagsJson');
 const lintJavaScript = require('./tests/lintJavaScript');
+const validateYaml = require('./tests/validateYaml');
+const validateJson = require('./tests/validateJson');
+const validateJavaScript = require('./tests/validateJavaScript');
+const validateHtml = require('./tests/validateHtml');
+const validateMedia = require('./tests/validateMedia');
+const validateGeneric = require('./tests/validateGeneric');
+const validateFilename = require('./tests/validateFilename');
+// const validateMarkdown = require('./tests/validateMarkdown');
 
 /** ***************************************************************************
  * Constants & Remark Lint Options
  *****************************************************************************/
 
 const MAX_DESCRIPTION_LENGTH = 485;
-const MAX_FILE_SIZE_WARN = 500; // Max file size (in kB) before warning
-const MAX_FILE_SIZE_ERROR = 2500; // Max file size (in kB) before error
 const MAX_FILES_CHANGED_WARNING = 500; // Max # of files changed before warning
 const MAX_FILES_CHANGED_ERROR = 1000; // Max # of files changed before error
 const MD_FILES = ['.md', '.mdown', '.markdown'];
-const EXTENSIONS_TO_SKIP = ['.css', '.vtt', '.xml'];
+const EXTENSIONS_TO_SKIP = ['.css', '.vtt', '.xml', '.txt'];
 const MEDIA_FILES = [
   '.gif', '.ico', '.jpg', '.png', '.psd', '.svg',
   '.mov', '.mp3', '.mp4', '.webm',
@@ -820,105 +826,6 @@ function testMarkdown(filename, contents, options) {
   });
 }
 
-/**
- * Tests a YAML file
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested
- * @param {string} contents The contents of the file to be tested
- * @return {Promise} A promise that resolves with TRUE if the file was tested
- *  or FALSE if the file was not tested.
- */
-function testYAML(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    parseYAML(filename, contents);
-    resolve(true);
-  })
-  .catch(function(ex) {
-    let msg = `An exception occurred in testYAML: ${ex}`;
-    logError(filename, null, msg, ex);
-    return false;
-  });
-}
-
-/**
- * Tests a JSON file
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested
- * @param {string} contents The contents of the file to be tested
- * @return {Promise} A promise that resolves with TRUE if the file was tested
- *  or FALSE if the file was not tested.
- */
-function testJSON(filename, contents) {
-  return new Promise(function(resolve, reject) {
-    parseJSON(filename, contents);
-    resolve(true);
-  })
-  .catch(function(ex) {
-    let msg = `An exception occurred in testJSON: ${ex}`;
-    logError(filename, null, msg, ex);
-    return false;
-  });
-}
-
-/**
- * Tests & validates a JavaScript file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested
- * @param {string} contents The contents of the file to be tested
- * @param {Object} options Options used to test the file
- * @return {Promise} A promise that resolves with TRUE if the file was tested
- *  or FALSE if the file was not tested.
- */
-function testJavaScript(filename, contents, options) {
-  return new Promise(function(resolve, reject) {
-    let isInCodeFolder = filename.indexOf('/_code/') > 0;
-    if (options.warnOnJavaScript && !isInCodeFolder) {
-      logWarning(filename, null, 'JavaScript files are generally not allowed.');
-    }
-    resolve(true);
-  })
-  .catch(function(ex) {
-    let msg = `An exception occurred in testJavaScript: ${ex}`;
-    logError(filename, null, msg, ex);
-    return false;
-  });
-}
-
-/**
- * Tests & validates an HTML file.
- *   Note: The returned promise always resolves, it will never reject.
- *
- * @param {string} filename The name of the file to be tested
- * @param {string} contents The contents of the file to be tested
- * @param {Object} options Options used to test the file
- * @return {Promise} A promise that resolves with TRUE if the file was tested
- *  or FALSE if the file was not tested.
- */
-function testHTML(filename, contents, options) {
-  return new Promise(function(resolve, reject) {
-    let isInCodeFolder = filename.indexOf('/_code/') > 0;
-
-    // Throw error on hard coded developers.google.com
-    if (!isInCodeFolder) {
-      let matched = wfRegEx.getMatches(/developers\.google\.com/g, contents);
-      matched.forEach(function(match) {
-        let position = {line: getLineNumber(contents, match.index)};
-        let msg = 'Do not use hard coded developers.google.com.';
-        logError(filename, position, msg);
-      });
-    }
-    resolve(true);
-  })
-  .catch(function(ex) {
-    let msg = `An exception occurred in testHTML: ${ex}`;
-    logError(filename, null, msg, ex);
-    return false;
-  });
-}
-
 
 /** ***************************************************************************
  * Primary File Test
@@ -933,152 +840,111 @@ function testHTML(filename, contents, options) {
  * @return {Promise} A promise that resolves after the tests have completed.
  */
 function testFile(filename, opts) {
-  return new Promise(function(resolve, reject) {
-    let msg;
-    let testPromise;
-    let filenameObj = path.parse(filename.toLowerCase());
+  const filenameObj = path.parse(filename.toLowerCase());
 
-    // Check the filename for illegal characters
-    if (filename.indexOf(' ') >= 0 ||
-        filename.indexOf('%') >= 0 ||
-        filename.indexOf('(') >= 0 ||
-        filename.indexOf(')') >= 0 ||
-        filename.indexOf('[') >= 0 ||
-        filename.indexOf(']') >= 0 ||
-        filename.indexOf('?') >= 0) {
-          msg = 'Illegal character(s) in filename.';
-          logError(filename, null, msg);
-    }
-
-    // Check if the file is an extension we skip
-    if (EXTENSIONS_TO_SKIP.indexOf(filenameObj.ext) >= 0) {
-      if (global.WF.options.verbose) {
-        msg = 'Skipped (extension).';
-        gutil.log(chalk.gray('SKIP:'), chalk.cyan(filename), msg);
-      }
-      resolve(false);
-      return;
-    }
-
-    // Check media files & verify they're not too big
-    if (MEDIA_FILES.indexOf(filenameObj.ext) >= 0) {
-      let fsOK = true;
-      if (opts.ignoreFileSize) {
-        resolve(fsOK);
-        return;
-      }
-      try {
-        // Read the file size and check if it exceeds the known limits
-        const stats = fs.statSync(filename);
-        const fileSize = Math.round(parseInt(stats.size, 10) / 1024);
-        if (fileSize > MAX_FILE_SIZE_ERROR) {
-          fsOK = false;
-          msg = `Exceeds maximum files size (${MAX_FILE_SIZE_ERROR}K)`;
-          // For builds of master on Travis, warn only, do not error.
-          if (IS_TRAVIS && IS_TRAVIS_PUSH && IS_TRAVIS_ON_MASTER) {
-            logWarning(filename, null, `${msg} - was ${fileSize}K`);
-          } else {
-            logError(filename, null, `${msg} - was ${fileSize}K`);
-          }
-        } else if (fileSize > MAX_FILE_SIZE_WARN) {
-          fsOK = false;
-          msg = `Try to keep files below (${MAX_FILE_SIZE_WARN}K)`;
-          logWarning(filename, null, `${msg} - was ${fileSize}K`);
-        }
-      } catch (ex) {
-        fsOK = false;
-        logWarning(filename, null, `Unable to read file stats: ${ex.message}`);
-      }
-      resolve(fsOK);
-      return;
-    }
-
-    // Attempt to read the file contents
-    let contents = readFile(filename);
-    if (!contents) {
-      resolve(false);
-      return;
-    }
-
-    // Check if the file is auto-generated, if it is, ignore it
-    if (wfRegEx.RE_AUTO_GENERATED.test(contents)) {
-      if (global.WF.options.verbose) {
-        msg = 'Skipped (auto-generated).';
-        gutil.log(chalk.gray('SKIP:'), chalk.cyan(filename), msg);
-      }
-      resolve(false);
-      return;
-    }
-
+  // Check if the file is an extension we skip
+  if (EXTENSIONS_TO_SKIP.indexOf(filenameObj.ext) >= 0) {
     if (global.WF.options.verbose) {
-      gutil.log('TEST:', chalk.cyan(filename));
+      const msg = 'Skipped (extension).';
+      gutil.log(chalk.gray('SKIP:'), chalk.cyan(filename), msg);
     }
+    return Promise.resolve(false);
+  }
 
-    if (filenameObj.base === 'app.yaml') {
-      let msg = 'app.yaml was changed, was that intentional?';
-      logWarning(filename, null, msg);
-      testPromise = testYAML(filename, contents);
-    } else if (filenameObj.base === '_contributors.yaml') {
-      testPromise = testContributors
-        .test(filename, parseYAML(filename, contents))
-        .then(tempPrintResults);
-    } else if (filenameObj.base === 'glossary.yaml') {
-      testPromise = testGlossary
-        .test(filename, parseYAML(filename, contents))
-        .then(tempPrintResults);
-    } else if (filenameObj.base === '_redirects.yaml') {
-      testPromise = testRedirects
-        .test(filename, parseYAML(filename, contents))
-        .then(tempPrintResults);
-    } else if (filenameObj.base === '_project.yaml') {
-      testPromise = testProject
-        .test(filename, parseYAML(filename, contents))
-        .then(tempPrintResults);
-    } else if (filenameObj.base === 'commontags.json') {
-      testPromise = testCommonTags
-        .test(filename, parseJSON(filename, contents))
-        .then(tempPrintResults);
-    } else if (MD_FILES.indexOf(filenameObj.ext) >= 0) {
-      testPromise = testMarkdown(filename, contents, opts);
-    } else if (RE_GULP_BASE.test(filenameObj.dir)) {
-      testPromise = lintJavaScript
-        .test(filename, esLintConfig, contents)
-        .then(tempPrintResults);
-    } else if (filenameObj.base === 'gulpfile.js') {
-      testPromise = lintJavaScript
-        .test(filename, esLintConfig, contents)
-        .then(tempPrintResults);
-    } else if (filenameObj.ext === '.html') {
-      testPromise = testHTML(filename, contents);
-    } else if (filenameObj.ext === '.yaml') {
-      testPromise = testYAML(filename, contents);
-    } else if (filenameObj.ext === '.json') {
-      testPromise = testJSON(filename, contents);
-    } else if (filenameObj.ext === '.js') {
-      testPromise = testJavaScript(filename, contents, opts);
-    } else if (filenameObj.ext === '.txt') {
-      // Text files are allowed and don't need to be tested.
-      resolve(true);
-      return;
-    } else {
-      let msg = 'No tests found for file type, was not tested.';
-      logWarning(filename, null, msg);
-      resolve(false);
-      return;
+  // Check media files & verify they're not too big
+  if (MEDIA_FILES.indexOf(filenameObj.ext) >= 0) {
+    if (opts.ignoreFileSize) {
+      return Promise.resolve(false);
     }
-    testPromise.then(function() {
-      resolve(true);
-    });
-  })
-  .catch(function(ex) {
-    let msg = `A critical test exception occurred: ${ex.message}`;
-    logError(filename, null, msg, ex);
-  })
-  .then(function(wasTested) {
-    if (wasTested) {
-      filesTested++;
+    const warnOnly = IS_TRAVIS && IS_TRAVIS_ON_MASTER;
+    return validateMedia.test(filename, warnOnly);
+  }
+
+  // Attempt to read the file contents
+  let contents = readFile(filename);
+  if (!contents) {
+    return Promise.resolve(false);
+  }
+
+  // Check if the file is auto-generated, if it is, ignore it
+  if (wfRegEx.RE_AUTO_GENERATED.test(contents)) {
+    if (global.WF.options.verbose) {
+      const msg = `Skipped (auto-generated).`;
+      gutil.log(chalk.gray('SKIP:'), chalk.cyan(filename), msg);
     }
-  });
+    return Promise.resolve(false);
+  }
+
+  // Check the app.yaml file
+  if (filenameObj.base === 'app.yaml') {
+    logWarning(filename, null, `'app.yaml' was changed, was that intentional?`);
+    return validateYaml.test(filename, contents);
+  }
+
+  // Check the contributors file
+  if (filenameObj.base === '_contributors.yaml') {
+    return validateYaml.test(filename, contents)
+      .then((parsed) => testContributors.test(filename, parsed));
+  }
+
+  // Check the glossary file
+  if (filenameObj.base === 'glossary.yaml') {
+    return validateYaml.test(filename, contents)
+      .then((parsed) => testGlossary.test(filename, parsed));
+  }
+
+  // Check the redirects file
+  if (filenameObj.base === '_redirects.yaml') {
+    return validateYaml.test(filename, contents)
+      .then((parsed) => testRedirects.test(filename, parsed));
+  }
+
+  // Check the project.yaml file
+  if (filenameObj.base === '_project.yaml') {
+    return validateYaml.test(filename, contents)
+      .then((parsed) => testProject.test(filename, parsed));
+  }
+
+  // Check the common tags file
+  if (filenameObj.base === 'commontags.json') {
+    return validateJson.test(filename, contents)
+      .then((parsed) => testCommonTags.test(filename, parsed));
+  }
+
+  // Check & validate the Gulp JavaScript files
+  if (RE_GULP_BASE.test(filenameObj.dir) ||
+      filenameObj.base === 'gulpfile.js') {
+    return lintJavaScript.test(filename, esLintConfig, contents);
+  }
+
+  // Check markdown files
+  if (MD_FILES.indexOf(filenameObj.ext) >= 0) {
+    return testMarkdown(filename, contents, opts);
+    // return validateMarkdown.test(filename, contents);
+  }
+
+  // Check HTML files
+  if (filenameObj.ext === '.html') {
+    return validateHtml.test(filename, contents);
+  }
+
+  // Check YAML files
+  if (filenameObj.ext === '.yaml') {
+    return validateYaml.test(filename, contents);
+  }
+
+  // Check JSON files
+  if (filenameObj.ext === '.json') {
+    return validateJson.test(filename, contents);
+  }
+
+  // Check JS files
+  if (opts.warnOnJavaScript && filenameObj.ext === '.js') {
+    return validateJavaScript.test(filename, contents);
+  }
+
+  // Check any stray files
+  return validateGeneric.test(filename, contents);
 }
 
 /**
@@ -1087,19 +953,29 @@ function testFile(filename, opts) {
  * @param {Array} results The array of results.
  * @return {Array} results as handed in.
  */
-function tempPrintResults(results) {
+function printTestResults(results) {
+  if (!results) {
+    return false;
+  }
+  if (Array.isArray(results) === false) {
+    results = [results];
+  }
   results.forEach((result) => {
     const filename = result.filename;
     const position = result.position;
     const message = result.message;
     const extra = result.extra;
+    if (result.level === 'PETE') {
+      // eslint-disable-next-line no-console
+      console.log(chalk.cyan('PETE'), filename, position, message, extra);
+    }
     if (result.level === 'ERROR') {
       logError(filename, position, message, extra);
     } else {
       logWarning(filename, position, message, extra);
     }
   });
-  return results;
+  return true;
 }
 
 
@@ -1257,7 +1133,19 @@ gulp.task('test', ['test:travis-init'], function() {
     .then(function(files) {
       gutil.log(chalk.green('Testing'), 'files...');
       return Promise.all(files.map(function(filename) {
-        return testFile(filename, opts);
+        if (global.WF.options.verbose) {
+          gutil.log('TESTING:', chalk.cyan(filename));
+        }
+        if (!validateFilename.test(filename)) {
+          logError(filename, null, `File contains illegal characters.`);
+        }
+        return testFile(filename, opts)
+          .catch(printTestResults)
+          .then((wasTested) => {
+            if (wasTested) {
+              filesTested++;
+            }
+          });
       }));
     })
     .catch(function(ex) {

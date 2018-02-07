@@ -14,17 +14,13 @@
  * @return {Promise} A promise with the result of the test.
  */
 function test(filename, tags) {
-  return new Promise(function(resolve, reject) {
-    if (Array.isArray(tags) === true) {
-      resolve([]);
-      return;
-    }
-    const result = {
-      level: 'ERROR',
-      filename: filename,
-      message: `Common tags file must be an array, was ${typeof tags}`,
-    };
-    resolve([result]);
+  if (Array.isArray(tags) === true) {
+    return Promise.resolve(true);
+  }
+  return Promise.reject({
+    level: 'ERROR',
+    filename: filename,
+    message: `Common tags file must be an array, was ${typeof tags}`,
   });
 }
 

@@ -105,7 +105,11 @@ function test(filename, contributors) {
       }
       prevFamilyName = familyName;
     });
-    resolve(results);
+    if (results.length > 0) {
+      reject(results);
+      return;
+    }
+    resolve(true);
   });
 }
 

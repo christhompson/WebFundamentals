@@ -71,7 +71,11 @@ function test(filename, glossary) {
       }
       prevTermName = termName;
     });
-    resolve(results);
+    if (results.length > 0) {
+      reject(results);
+      return;
+    }
+    resolve(true);
   });
 }
 

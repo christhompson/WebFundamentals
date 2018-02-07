@@ -43,7 +43,11 @@ function test(filename, esLintConfig, contents) {
       }
       results.push(logResult);
     });
-    resolve(results);
+    if (results.length > 0) {
+      reject(results);
+      return;
+    }
+    resolve(true);
   });
 }
 
