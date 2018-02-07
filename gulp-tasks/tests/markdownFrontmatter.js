@@ -5,12 +5,31 @@
  */
 'use strict';
 
+const fs = require('fs');
 const wfRegEx = require('../wfRegEx');
 
 const MAX_DESCRIPTION_LENGTH = 485;
 
+/**
+ * Checks if a file exists.
+ *
+ * @todo Remove this
+ *
+ * @param {string} filename The WebFundamentals file path.
+ * @return {Boolean} True if it exists, false if not.
+ */
 function doesFileExist(filename) {
-  return true;
+  if (!filename) {
+    return false;
+  }
+  filename = filename.trim();
+  filename = filename.replace(/^\/?web\/(.*)/, 'src/content/en/$1');
+  try {
+    fs.accessSync(filename, fs.R_OK);
+    return true;
+  } catch (ex) {
+    return false;
+  }
 }
 
 /**
@@ -118,29 +137,29 @@ function test(filename, contents, isInclude) {
       filename: filename,
       message: `Attribute 'wf_updated_on' missing from top of document`,
     });
-  } else
+  } // else
 
-  if (!isInclude && !isTranslation) {
-    if (!matched) {
-      msg = 'WF Tag `wf_updated_on` is missing (YYYY-MM-DD)';
-      logError(filename, null, msg);
-    } else {
-      position = {line: getLineNumber(contents, matched.index)};
-      let d = moment(matched[1], VALID_DATE_FORMATS, true);
-      if (d.isValid() === false) {
-        msg = 'WF Tag `wf_updated_on` invalid format (YYYY-MM-DD)';
-        msg += `, found: ${matched[1]}`;
-        logError(filename, position, msg);
-      } else if (options.lastUpdateMaxDays) {
-        const nowMinus = moment().subtract(options.lastUpdateMaxDays, 'days');
-        if (d.isBefore(nowMinus)) {
-          msg = 'WF Tag `wf_updated_on` must be within the last ';
-          msg += options.lastUpdateMaxDays + ' days.';
-          logWarning(filename, position, msg);
-        }
-      }
-    }
-  }
+  // if (!isInclude && !isTranslation) {
+  //   if (!matched) {
+  //     msg = 'WF Tag `wf_updated_on` is missing (YYYY-MM-DD)';
+  //     logError(filename, null, msg);
+  //   } else {
+  //     position = {line: getLineNumber(contents, matched.index)};
+  //     let d = moment(matched[1], VALID_DATE_FORMATS, true);
+  //     if (d.isValid() === false) {
+  //       msg = 'WF Tag `wf_updated_on` invalid format (YYYY-MM-DD)';
+  //       msg += `, found: ${matched[1]}`;
+  //       logError(filename, position, msg);
+  //     } else if (options.lastUpdateMaxDays) {
+  //      const nowMinus = moment().subtract(options.lastUpdateMaxDays, 'days');
+  //       if (d.isBefore(nowMinus)) {
+  //         msg = 'WF Tag `wf_updated_on` must be within the last ';
+  //         msg += options.lastUpdateMaxDays + ' days.';
+  //         logWarning(filename, position, msg);
+  //       }
+  //     }
+  //   }
+  // }
 
   return results;
 }
